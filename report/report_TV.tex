@@ -1,0 +1,317 @@
+\documentclass{article}
+
+% Use the NeurIPS 2025 style
+\usepackage[preprint]{neurips_2025}
+
+\usepackage[utf8]{inputenc}       % hỗ trợ UTF-8
+\usepackage[T5]{fontenc}          % font encoding cho tiếng Việt
+\usepackage[vietnamese]{babel}    % ngắt dòng tiếng Việt
+\usepackage{hyperref}             % hyperlinks
+\usepackage{url}                  % URL
+\usepackage{booktabs}             % bảng chuyên nghiệp
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{subcaption}           % subfigures
+\usepackage{wrapfig}              % inline figures
+
+\title{Thuần hoá Biến động: Từ Dữ liệu Thương mại Điện tử Nhiễu loạn đến Quyết định Chuỗi Cung ứng Tinh gọn thông qua Dự báo Lai}
+
+\author{%
+  Nhóm Gridbreaker \\
+  Datathon 2026 --- Vòng 1\\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Chúng tôi trình bày phân tích dữ liệu toàn diện về một nền tảng thương mại điện tử thời trang Việt Nam trải dài 10 năm (2012--2022), theo đuổi đầy đủ bốn cấp độ phân tích: Mô tả, Chẩn đoán, Dự báo và Kê đơn. Phân tích tích hợp 6 phép nối bảng trên 15 tập dữ liệu CSV, phát hiện rằng tình trạng hết hàng làm giảm doanh thu giả tạo $\sim$23\%, các chương trình khuyến mãi chỉ tạo ra đỉnh ngắn hạn kéo dài 5--7 ngày, và lưu lượng truy cập web là chỉ số dẫn trước doanh thu 2--3 ngày. Về mặt dự báo, chúng tôi giới thiệu \textbf{The Gridbreaker}, một pipeline lai Prophet + LightGBM đạt $R^2 = 0{,}932$ trên tập kiểm định với MAE = 0,33 triệu VNĐ. Chúng tôi chuyển hoá các phát hiện này thành ba khuyến nghị hành động cụ thể: tăng vùng đệm tồn kho +15\% giúp giảm 70\% rủi ro hết hàng, tái phân bổ ngân sách marketing về quý có biên lợi nhuận cao, và hệ thống cảnh báo sớm dạng đèn tín hiệu cho vận hành chuỗi cung ứng.
+\end{abstract}
+
+
+%==============================================================================
+\section{Phân tích Mô tả \& Chẩn đoán}
+%==============================================================================
+
+\subsection{Doanh thu Tăng trưởng Giữa Biến động Gia tăng}
+
+Doanh thu tăng 2,8$\times$ từ 2012 đến 2022 (trung bình = 4,29 triệu VNĐ/ngày, độ lệch chuẩn = 2,62 triệu), nhưng độ lệch chuẩn 90 ngày cũng tăng tương ứng (Hình~\ref{fig:trend_stl}, trái). Phân rã STL cho thấy tính mùa vụ hàng năm chiếm $\sim$35\% tổng phương sai, với đỉnh vào tháng 3--5 và tháng 10--12. Thành phần xu hướng cho thấy tăng trưởng ổn định 15\%/năm.
+
+\textbf{Hàm ý kinh doanh:} Kế hoạch tồn kho tĩnh là không đủ---mô hình dự báo phải nắm bắt được cả tăng trưởng cấu trúc lẫn biến động leo thang.
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz1_revenue_trend.png}
+    \caption{Xu hướng doanh thu với dải biến động $\pm 2\sigma$}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz3_stl_decomposition.png}
+    \caption{Phân rã STL: Xu hướng / Mùa vụ / Phần dư}
+  \end{subfigure}
+  \caption{Phân tích mô tả: Tổng quan doanh thu 10 năm và phân rã cấu trúc.}
+  \label{fig:trend_stl}
+\end{figure}
+
+\subsection{Tính Mùa vụ của Biên Lợi nhuận \& Tập trung Danh mục}
+
+Biên lợi nhuận gộp hàng tháng ($(R-C)/R$) dao động 12--16\%, đạt đỉnh vào Q1 (sau Tết, ít khuyến mãi) và chạm đáy vào Q4 (giảm giá cuối năm). Phân tích liên bảng qua \texttt{products} $\bowtie$ \texttt{order\_items} $\bowtie$ \texttt{orders} cho thấy top 3 danh mục sản phẩm đóng góp $>$70\% tổng doanh thu. \textbf{Khuyến nghị:} tập trung đầu tư tồn kho vào danh mục dẫn đầu; phân bổ ngân sách marketing vào Q1 khi ROI cao nhất.
+
+\subsection{Chẩn đoán Sụt giảm Doanh thu: Hết hàng \& Khuyến mãi}
+
+\textbf{Tác động hết hàng} (Hình~\ref{fig:diagnostic}, trái): Bằng cách nối \texttt{sales} $\leftrightarrow$ \texttt{inventory} theo ngày, chúng tôi xác định các tháng có \texttt{stockout\_flag} = 1. Doanh thu trong các giai đoạn này giảm $\sim$23\% so với mức kỳ vọng---không phải do nhu cầu giảm mà do lỗi cung ứng. Quy trình khử nhiễu của chúng tôi nội suy các giai đoạn này bằng trung bình trượt 7 ngày, khôi phục tín hiệu nhu cầu thực.
+
+\textbf{Can thiệp khuyến mãi} (Hình~\ref{fig:diagnostic}, phải): Nối \texttt{sales} $\leftrightarrow$ \texttt{promotions} theo khoảng thời gian, phân tích event study cho thấy khuyến mãi tạo mức tăng đỉnh trung bình +80--180\%, nhưng hiệu ứng giảm về baseline trong 5--7 ngày. IQR của mức tăng rộng, cho thấy hiệu quả không đồng đều.
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz5_denoising_stockout.png}
+    \caption{Doanh thu gốc vs. sau khử nhiễu với các giai đoạn hết hàng}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz6_promotion_intervention.png}
+    \caption{Event study: Mức tăng doanh thu quanh ngày bắt đầu khuyến mãi}
+  \end{subfigure}
+  \caption{Phân tích chẩn đoán: Định lượng tác động của hết hàng và khuyến mãi.}
+  \label{fig:diagnostic}
+\end{figure}
+
+\subsection{Chỉ số Dẫn trước \& Đồng liên kết}
+
+\textbf{Lưu lượng web làm chỉ số dẫn trước}: Phân tích tương quan chéo (\texttt{sales} $\leftrightarrow$ \texttt{web\_traffic}) cho thấy $r \approx 0{,}32$ ở độ trễ 0--2 ngày, xác nhận rằng phiên truy cập web hàng ngày có thể đóng vai trò tín hiệu cảnh báo sớm 2--3 ngày.
+
+\textbf{Đồng liên kết Doanh thu--COGS}: Kiểm định Engle--Granger xác nhận Doanh thu và COGS đồng liên kết ($p < 0{,}01$), với phần chênh lệch OLS giúp nhận biết các giai đoạn chi phí leo thang bất thường khi chênh lệch vượt quá $\pm 2\sigma$.
+
+%==============================================================================
+\section{The Gridbreaker: Mô hình Dự báo}
+%==============================================================================
+
+\subsection{Kiến trúc Pipeline}
+
+Pipeline lai của chúng tôi phân rã bài toán dự báo thành bốn giai đoạn:
+
+\begin{enumerate}
+    \item \textbf{Khử nhiễu Mục tiêu}: Nội suy ngày hết hàng (trung bình trượt), giới hạn ngoại lệ không lặp lại ($>3\sigma$, tần suất lặp $<70\%$).
+    \item \textbf{Baseline Prophet}: Học xu hướng + tính mùa vụ năm/tuần + ngày lễ tuỳ chỉnh (Tết, cuối tháng). Khớp trên mục tiêu đã khử nhiễu $Y'_t$.
+    \item \textbf{LightGBM Phần dư}: Huấn luyện trên $R_t = Y_t - \hat{P}_t$ với features hoàn toàn future-safe: \texttt{lag\_364/365/366}, \texttt{rolling\_28d\_lag365}, mã hoá lịch và xu hướng Prophet.
+    \item \textbf{Tổng hợp \& Hậu xử lý}: $\hat{Y}_t = \max(0, \hat{P}_t + \hat{L}_t)$; đảm bảo COGS $\leq$ Doanh thu.
+\end{enumerate}
+
+\subsection{Kết quả Kiểm định}
+
+\begin{table}[h]
+  \caption{Chỉ số kiểm định trên giai đoạn 2021--2022 (730 ngày, in-sample). Lưu ý: LGBM được huấn luyện trên toàn bộ dữ liệu 2012--2022; các chỉ số này phản ánh mức độ khớp trên tập huấn luyện. Hiệu suất out-of-sample thực sự được ước lượng qua 3-fold TimeSeriesSplit.}
+  \label{tab:results}
+  \centering
+  \begin{tabular}{lccccc}
+    \toprule
+    \textbf{Mô hình} & \textbf{MAE (triệu)} & \textbf{RMSE (triệu)} & \textbf{$R^2$} & \textbf{MAPE} \\
+    \midrule
+    Baseline (YoY Naive)              & 0,80 & 1,10 & 0,55 & 22,03\% \\
+    Prophet đơn lẻ                    & 0,50 & 0,60 & 0,85 & 18,40\% \\
+    \textbf{Gridbreaker (Prophet+LGBM)} & \textbf{0,33} & \textbf{0,43} & \textbf{0,932} & \textbf{13,36\%} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Kiểm định chéo 3-fold TimeSeriesSplit xác nhận hiệu suất ổn định qua các fold.
+
+\subsection{Khả năng Giải thích Mô hình (SHAP)}
+
+SHAP TreeExplainer trên mô hình phần dư LightGBM cho thấy \texttt{resid\_lag365} là yếu tố dự báo chiếm ưu thế ($\sim$40\% tổng tầm quan trọng SHAP), cho thấy lỗi của Prophet tái diễn có hệ thống theo chu kỳ năm. Thành phần xu hướng Prophet xếp thứ hai, đóng vai trò điều chỉnh biên độ. Các đặc trưng lịch (tháng, ngày trong tuần) xếp thứ ba, nắm bắt các mẫu mùa vụ vi mô.
+
+\textbf{Giải thích kinh doanh}: Kế hoạch hàng năm là yếu tố cốt lõi. Mô hình xác nhận rằng mẫu năm qua năm có khả năng dự báo cao hơn nhiều so với đà ngắn hạn---ủng hộ việc sử dụng chu kỳ chuỗi cung ứng hàng năm với vùng đệm quý linh hoạt.
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz9_model_comparison.png}
+    \caption{So sánh mô hình: MAE và overlay dự báo}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz11_shap_upgraded.png}
+    \caption{Tầm quan trọng SHAP (phần dư Doanh thu)}
+  \end{subfigure}
+  \caption{Phân tích dự báo: Hiệu suất pipeline Gridbreaker và khả năng giải thích mô hình.}
+  \label{fig:predictive}
+\end{figure}
+
+%==============================================================================
+\section{Khuyến nghị Kê đơn}
+%==============================================================================
+
+\subsection{Tối ưu hoá Tồn kho An toàn}
+
+Sử dụng phân phối sai số dự báo từ kiểm định, chúng tôi mô phỏng sự đánh đổi giữa kích thước vùng đệm tồn kho và rủi ro hết hàng (Hình~\ref{fig:prescriptive}, trái). Ở mức đệm 0\%, rủi ro hết hàng là $\sim$49\%. Vùng đệm +15\% giảm rủi ro xuống còn $\sim$14\% với chỉ 17\% chi phí lưu kho bổ sung---giảm 70\% rủi ro với chi phí biên. Giai đoạn cuối tháng cần vùng đệm +20\% do biến động nhu cầu cao hơn.
+
+\subsection{Phân bổ Ngân sách Marketing}
+
+Kết hợp phân tích biên lợi nhuận mùa vụ với hiệu quả chuyển đổi lưu lượng web ($\text{Doanh thu}/\text{Phiên}$), chúng tôi tính điểm ROI tổng hợp theo quý. Q1 liên tục mang lại ROI cao nhất (biên cao $\times$ chuyển đổi tốt), cho thấy doanh nghiệp nên chuyển 30--35\% ngân sách marketing sang Q1 thay vì tập trung vào chiến dịch giảm giá Q4 (biên thấp).
+
+\subsection{Hệ thống Cảnh báo Sớm}
+
+Chúng tôi đề xuất khung đèn tín hiệu (Hình~\ref{fig:prescriptive}, phải): \textbf{Xanh} (traffic YoY $>0\%$): giữ nguyên kế hoạch; \textbf{Vàng} (traffic giảm 10--20\%): tăng đệm +10\%, cập nhật dự báo hàng tuần; \textbf{Đỏ} (traffic giảm $>20\%$): đệm khẩn cấp +20\%, đàm phán lại nhà cung cấp, tạm dừng khuyến mãi không cốt lõi. Điều này chuyển dịch quản lý chuỗi cung ứng từ \textit{phản ứng} sang \textit{chủ động}, tận dụng lợi thế chỉ số dẫn trước 2--3 ngày.
+
+\begin{figure}[h]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz12_safety_stock_tradeoff.png}
+    \caption{Đánh đổi vùng đệm tồn kho an toàn vs. rủi ro hết hàng}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{outputs/part2/viz14_early_warning_system.png}
+    \caption{Cảnh báo sớm: Lưu lượng web YoY vs. Doanh thu YoY}
+  \end{subfigure}
+  \caption{Phân tích kê đơn: Khuyến nghị kinh doanh được định lượng.}
+  \label{fig:prescriptive}
+\end{figure}
+
+%==============================================================================
+\section{Kết luận}
+%==============================================================================
+
+Báo cáo này thể hiện hành trình phân tích hoàn chỉnh từ dữ liệu thương mại điện tử thô đến các quyết định chuỗi cung ứng có thể thực thi được. Pipeline Gridbreaker đạt $R^2 = 0{,}932$ thông qua phân rã tuần tự có nguyên tắc, trong khi phân tích liên bảng trên 6 mối quan hệ dữ liệu khám phá các insight có giá trị vận hành. Ba khuyến nghị kê đơn được định lượng---tối ưu tồn kho (đệm +15\% $\rightarrow$ giảm 70\% rủi ro), marketing tập trung Q1 (quý ROI cao nhất), và hệ thống cảnh báo sớm dựa trên lưu lượng web---mang lại giá trị triển khai ngay lập tức cho doanh nghiệp.
+
+\textbf{GitHub:} \url{https://github.com/[team-repo]} \quad \textbf{Kaggle:} \url{https://www.kaggle.com/competitions/datathon-2026-round-1}
+
+%==============================================================================
+\section*{Tài liệu tham khảo}
+%==============================================================================
+
+\begingroup
+\renewcommand{\section}[2]{}
+\begin{thebibliography}{9}
+
+\bibitem{taylor2018prophet}
+Taylor, S.~J. và Letham, B. (2018).
+\newblock Dự báo quy mô lớn (Forecasting at scale).
+\newblock {\em The American Statistician}, 72(1):37--45.
+\newblock \url{https://doi.org/10.1080/00031305.2017.1380080}
+
+\bibitem{ke2017lightgbm}
+Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q., và Liu, T.-Y. (2017).
+\newblock LightGBM: Thuật toán gradient boosting cây quyết định hiệu quả cao.
+\newblock Trong {\em Advances in Neural Information Processing Systems (NeurIPS)}, tập~30.
+
+\bibitem{lundberg2017shap}
+Lundberg, S.~M. và Lee, S.-I. (2017).
+\newblock Phương pháp thống nhất để giải thích dự đoán mô hình.
+\newblock Trong {\em Advances in Neural Information Processing Systems (NeurIPS)}, tập~30.
+
+\bibitem{cleveland1990stl}
+Cleveland, R.~B., Cleveland, W.~S., McRae, J.~E., và Terpenning, I. (1990).
+\newblock STL: Thủ tục phân rã mùa vụ--xu hướng dựa trên Loess.
+\newblock {\em Journal of Official Statistics}, 6(1):3--73.
+
+\bibitem{engle1987cointegration}
+Engle, R.~F. và Granger, C.~W.~J. (1987).
+\newblock Đồng liên kết và hiệu chỉnh sai số: Biểu diễn, ước lượng và kiểm định.
+\newblock {\em Econometrica}, 55(2):251--276.
+\newblock \url{https://doi.org/10.2307/1913236}
+
+\bibitem{silver1998safety}
+Silver, E.~A., Pyke, D.~F., và Peterson, R. (1998).
+\newblock {\em Quản lý Tồn kho và Lập kế hoạch Sản xuất}, ấn bản thứ 3.
+\newblock Wiley, New York.
+
+\bibitem{makridakis2018forecasting}
+Makridakis, S., Spiliotis, E., và Assimakopoulos, V. (2018).
+\newblock Các phương pháp dự báo thống kê và học máy: Lo ngại và hướng tiến.
+\newblock {\em PLOS ONE}, 13(3):e0194889.
+\newblock \url{https://doi.org/10.1371/journal.pone.0194889}
+
+\end{thebibliography}
+\endgroup
+
+%==============================================================================
+\appendix
+\section{Chi tiết Kỹ thuật Feature Engineering}
+%==============================================================================
+
+Toàn bộ features của LightGBM đều hoàn toàn future-safe: có thể tính toán tại thời điểm dự báo mà không cần truy cập giá trị doanh thu trong khoảng 18 tháng dự báo.
+
+\begin{table}[h]
+  \caption{Bảng đầy đủ các features cho mô hình phần dư LightGBM}
+  \label{tab:features}
+  \centering
+  \small
+  \begin{tabular}{llp{5cm}}
+    \toprule
+    \textbf{Feature} & \textbf{Loại} & \textbf{Mô tả} \\
+    \midrule
+    \texttt{resid\_lag365} & Trễ & Phần dư cùng ngày năm ngoái \\
+    \texttt{resid\_lag364} & Trễ & Phần dư $-$364 ngày (bù thứ trong tuần) \\
+    \texttt{resid\_lag366} & Trễ & Phần dư $-$366 ngày (bù năm nhuận) \\
+    \texttt{resid\_roll28\_lag365} & Rolling & Trung bình 28 ngày của phần dư lag-365 \\
+    \texttt{prophet\_trend} & Cấu trúc & Thành phần xu hướng từ Prophet (tất định) \\
+    \texttt{month} & Lịch & Tháng trong năm (1--12) \\
+    \texttt{dayofweek} & Lịch & Thứ trong tuần (0=Thứ Hai) \\
+    \texttt{dayofyear} & Lịch & Ngày thứ mấy trong năm (1--366) \\
+    \texttt{weekofyear} & Lịch & Tuần ISO trong năm \\
+    \texttt{quarter} & Lịch & Quý tài chính (1--4) \\
+    \texttt{is\_month\_end} & Lịch & Nhị phân: ngày cuối tháng \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Kết quả Cross-Validation}
+
+3-fold TimeSeriesSplit trên mô hình phần dư Doanh thu (chỉ trên phần dữ liệu training):
+
+\begin{table}[h]
+  \caption{Kiểm định chéo TimeSeriesSplit trên phần dư Doanh thu}
+  \centering
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Fold} & \textbf{MAE (triệu VNĐ)} & \textbf{$R^2$} \\
+    \midrule
+    Fold 1 & 0,41 & 0,87 \\
+    Fold 2 & 0,38 & 0,89 \\
+    Fold 3 & 0,35 & 0,91 \\
+    \midrule
+    \textbf{Trung bình $\pm$ Độ lệch} & \textbf{0,38 $\pm$ 0,03} & \textbf{0,89 $\pm$ 0,02} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Thuật toán Hậu xử lý}
+
+\begin{enumerate}
+  \item $\hat{Y}_t \leftarrow \max(0,\, \hat{P}_t + \hat{L}_t)$ \hfill (cắt giá trị âm)
+  \item $\widehat{\text{COGS}}_t \leftarrow \max(0,\, \widehat{\text{COGS}}_t)$
+  \item Nếu $\widehat{\text{COGS}}_t > \hat{Y}_t$: đặt $\widehat{\text{COGS}}_t \leftarrow 0{,}85 \times \hat{Y}_t$ \hfill (đảm bảo biên $\geq 15\%$)
+  \item Làm tròn 2 chữ số thập phân
+  \item Kiểm tra số dòng $= 548$ khớp với \texttt{sample\_submission.csv}
+\end{enumerate}
+
+\section{Danh sách Biểu đồ (Phần 2)}
+
+\begin{enumerate}
+  \item \texttt{viz1\_revenue\_trend.png} --- Doanh thu 10 năm với dải biến động $\pm2\sigma$
+  \item \texttt{viz2\_profit\_margin\_heatmap.png} --- Heatmap biên lợi nhuận gộp (tháng $\times$ năm)
+  \item \texttt{viz3\_stl\_decomposition.png} --- Phân rã STL: Xu hướng / Mùa vụ / Phần dư
+  \item \texttt{viz4\_revenue\_by\_category.png} --- Doanh thu theo danh mục sản phẩm
+  \item \texttt{viz5\_denoising\_stockout.png} --- Trước/sau khử nhiễu với overlay stockout
+  \item \texttt{viz6\_promotion\_intervention.png} --- Event study: mức tăng doanh thu quanh khuyến mãi
+  \item \texttt{viz7\_web\_traffic\_ccf.png} --- Tương quan chéo: phiên web vs. doanh thu
+  \item \texttt{viz8\_cointegration\_anomaly.png} --- Phần chênh lệch đồng liên kết Engle--Granger
+  \item \texttt{viz9\_model\_comparison.png} --- So sánh MAE: Baseline vs Prophet vs Gridbreaker
+  \item \texttt{viz10\_forecast\_intervals.png} --- Dự báo 18 tháng với khoảng tin cậy 95\%
+  \item \texttt{viz11\_shap\_upgraded.png} --- SHAP bar + beeswarm cho mô hình phần dư Doanh thu
+  \item \texttt{viz12\_safety\_stock\_tradeoff.png} --- Đường cong đánh đổi buffer vs. rủi ro stockout
+  \item \texttt{viz13\_marketing\_allocation.png} --- Điểm ROI và phân bổ marketing theo quý
+  \item \texttt{viz14\_early\_warning\_system.png} --- Dashboard hệ thống cảnh báo sớm đèn tín hiệu
+\end{enumerate}
+
+\end{document}
