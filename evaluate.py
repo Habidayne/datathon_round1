@@ -53,8 +53,8 @@ np.random.seed(SEED)
 # ══════════════════════════════════════════════════════════════
 # ✏️  THAY ĐỔI Ở ĐÂY để thử các split khác nhau
 # ══════════════════════════════════════════════════════════════
-TRAIN_END = "2020-12-31"   # Mô hình học đến ngày này
-VAL_START = "2021-01-01"   # Bắt đầu đánh giá (mô hình chưa thấy)
+TRAIN_END = "2021-12-31"   # Mô hình học đến ngày này
+VAL_START = "2022-01-01"   # Bắt đầu đánh giá (mô hình chưa thấy)
 VAL_END   = "2022-12-31"   # Kết thúc đánh giá
 # ══════════════════════════════════════════════════════════════
 
@@ -105,7 +105,7 @@ def run_evaluation(train_end: str, val_start: str, val_end: str):
     print()
 
     results = {}
-    for target in ["Revenue", "COGS"]:
+    for target in ["Revenue"]:
         print(f"[2-3/4] Prophet + LightGBM cho {target}...")
         clean_col = f"Clean_{target}"
         train_series = train[clean_col].dropna()
@@ -128,11 +128,42 @@ def run_evaluation(train_end: str, val_start: str, val_end: str):
         y_train = residual_train.reindex(X_train.index)
         lgbm_model = fit_lgbm_residual(X_train, y_train, target_name=target)
 
-        # Predict val
-        val_prophet = prophet_preds.loc[val_start:val_end, "prophet_pred"]
-        X_val = X_full.loc[val_start:val_end]
-        val_resid = predict_lgbm_residual(lgbm_model, X_val)
-        val_final = blend_forecasts(val_prophet, val_resid)
+        # ═══════════════════════════════════════════════════
+        # Predict val (ROLLING FORECAST)
+        # ═══════════════════════════════════════════════════
+        test_years = range(
+            pd.Timestamp(val_start).year,
+            pd.Timestamp(val_end).year + 1
+        )
+
+        all_predictions = []
+        residuals_rolling = full_residuals.copy()
+
+        for year in test_years:
+            year_start = f"{year}-01-01"
+            if pd.Timestamp(year_start) < pd.Timestamp(val_start):
+                year_start = val_start
+            
+            year_end = f"{year}-12-31"
+            if pd.Timestamp(year_end) > pd.Timestamp(val_end):
+                year_end = val_end
+
+            # Rebuild X_full với residuals hiện có
+            X_full_iter = make_future_safe_features(residuals_rolling, full_trend, full_idx)
+            
+            test_prophet_yr = prophet_preds.loc[year_start:year_end, "prophet_pred"]
+            X_test_yr       = X_full_iter.loc[year_start:year_end]
+            test_resid_yr   = predict_lgbm_residual(lgbm_model, X_test_yr)
+            test_revenue_yr = blend_forecasts(test_prophet_yr, test_resid_yr)
+
+            all_predictions.append(test_revenue_yr)
+
+            # Update residuals
+            proxy = test_revenue_yr - prophet_preds.loc[year_start:year_end, "prophet_pred"]
+            residuals_rolling.update(proxy)
+
+        val_final = pd.concat(all_predictions)
+        val_final = val_final.loc[val_start:val_end]
 
         actual = df.loc[val_start:val_end, target].reindex(val_final.index).dropna()
         predicted = val_final.reindex(actual.index)
@@ -141,6 +172,14 @@ def run_evaluation(train_end: str, val_start: str, val_end: str):
             "actual":    actual,
             "predicted": predicted,
         }
+
+    # Derive COGS mathematically
+    actual_cogs = df.loc[val_start:val_end, "COGS"].reindex(results["Revenue"]["predicted"].index).dropna()
+    predicted_cogs = (results["Revenue"]["predicted"] * 0.825).reindex(actual_cogs.index)
+    results["COGS"] = {
+        "actual": actual_cogs,
+        "predicted": predicted_cogs,
+    }
 
     # Metrics
     print()

@@ -24,14 +24,14 @@ def blend_forecasts(
 
 def postprocess(
     revenue_pred: pd.Series,
-    cogs_pred: pd.Series,
+    gross_margin: float,
     sample_submission_path: str,
     output_path: str,
 ) -> pd.DataFrame:
     """
     Hậu xử lý và xuất submission.csv:
     - Clip giá trị âm → 0
-    - Đảm bảo COGS ≤ Revenue (nếu vi phạm, set COGS = Revenue * 0.85)
+    - Dẫn xuất COGS từ Revenue (COGS = Revenue * (1 - gross_margin))
     - Đúng format sample_submission.csv
     """
     logger.info("=" * 50)
@@ -44,21 +44,17 @@ def postprocess(
     sub = pd.DataFrame({
         "Date": revenue_pred.index.strftime("%Y-%m-%d"),
         "Revenue": revenue_pred.values,
-        "COGS": cogs_pred.values,
     })
 
     # Clip âm
-    n_neg = (sub[["Revenue", "COGS"]] < 0).sum().sum()
+    n_neg = (sub["Revenue"] < 0).sum()
     sub["Revenue"] = sub["Revenue"].clip(lower=0)
-    sub["COGS"] = sub["COGS"].clip(lower=0)
     if n_neg > 0:
         logger.info(f"  Clipped {n_neg} negative value(s) → 0.")
 
-    # COGS ≤ Revenue (logic kinh doanh)
-    violate = sub["COGS"] > sub["Revenue"]
-    if violate.any():
-        sub.loc[violate, "COGS"] = sub.loc[violate, "Revenue"] * 0.85
-        logger.info(f"  Fixed {violate.sum()} row(s) where COGS > Revenue.")
+    # COGS derived from Revenue
+    cogs_ratio = 1 - gross_margin
+    sub["COGS"] = sub["Revenue"] * cogs_ratio
 
     # Round
     sub["Revenue"] = sub["Revenue"].round(2)
@@ -69,6 +65,7 @@ def postprocess(
 
     sub.to_csv(output_path, index=False)
     logger.info(f"  ✅ Saved submission: {output_path} ({len(sub)} rows)")
+    logger.info(f"     Gross margin: {gross_margin:.4f} → COGS ratio: {cogs_ratio:.4f}")
     logger.info(f"     Revenue: mean={sub['Revenue'].mean():,.0f}, min={sub['Revenue'].min():,.0f}, max={sub['Revenue'].max():,.0f}")
     logger.info(f"     COGS:    mean={sub['COGS'].mean():,.0f}, min={sub['COGS'].min():,.0f}, max={sub['COGS'].max():,.0f}")
 

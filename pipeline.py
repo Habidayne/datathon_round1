@@ -82,7 +82,7 @@ def run_pipeline():
     logger.info("=" * 50)
 
     results = {}
-    for target in ["Revenue", "COGS"]:
+    for target in ["Revenue"]:
         clean_col = f"Clean_{target}"
         train_series = train[clean_col].dropna()
 
@@ -116,15 +116,43 @@ def run_pipeline():
         y_train = residual_train.reindex(X_train.index)
         lgbm_model = fit_lgbm_residual(X_train, y_train, target_name=target)
 
-        # Predict residual cho test
-        X_test = X_full.loc[TEST_START:TEST_END]
-        lgbm_resid_pred = predict_lgbm_residual(lgbm_model, X_test)
+        # ═══════════════════════════════════════════════════
+        # BLEND & ROLLING FORECAST
+        # ═══════════════════════════════════════════════════
+        logger.info("=" * 50)
+        logger.info("BƯỚC 3.5: ROLLING FORECAST (TEST PERIOD)")
+        logger.info("=" * 50)
+        
+        test_years = range(
+            pd.Timestamp(TEST_START).year,
+            pd.Timestamp(TEST_END).year + 1
+        )
 
-        # ═══════════════════════════════════════════════════
-        # BLEND
-        # ═══════════════════════════════════════════════════
-        test_prophet = prophet_preds.loc[TEST_START:TEST_END, "prophet_pred"]
-        final_pred = blend_forecasts(test_prophet, lgbm_resid_pred)
+        all_predictions = []
+        residuals_rolling = full_residuals.copy()
+
+        for year in test_years:
+            year_start = f"{year}-01-01"
+            year_end   = f"{year}-12-31" if year < pd.Timestamp(TEST_END).year else TEST_END
+
+            # Rebuild X_full với residuals hiện có (cập nhật sau mỗi năm)
+            X_full_iter = make_future_safe_features(residuals_rolling, full_trend, full_idx)
+            
+            # Predict năm hiện tại
+            test_prophet_yr = prophet_preds.loc[year_start:year_end, "prophet_pred"]
+            X_test_yr       = X_full_iter.loc[year_start:year_end]
+            test_resid_yr   = predict_lgbm_residual(lgbm_model, X_test_yr)
+            test_revenue_yr = blend_forecasts(test_prophet_yr, test_resid_yr)
+
+            all_predictions.append(test_revenue_yr)
+
+            # Extend residuals với năm vừa predict (proxy cho năm tiếp theo)
+            proxy = test_revenue_yr - prophet_preds.loc[year_start:year_end, "prophet_pred"]
+            residuals_rolling.update(proxy)
+
+        # Ghép tất cả năm lại
+        final_pred = pd.concat(all_predictions)
+        final_pred = final_pred.loc[TEST_START:TEST_END]
 
         results[target] = final_pred
 
@@ -153,7 +181,7 @@ def run_pipeline():
     # ═══════════════════════════════════════════════════════
     sub = postprocess(
         revenue_pred=results["Revenue"],
-        cogs_pred=results["COGS"],
+        gross_margin=0.175,
         sample_submission_path=SAMPLE_SUB_FILE,
         output_path=OUTPUT_FILE,
     )
