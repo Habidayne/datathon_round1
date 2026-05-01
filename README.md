@@ -53,7 +53,7 @@ sales.csv (raw)
     │  - Impute ngày stockout (rolling mean 7 ngày)
     │  - Cap spike không lặp lại (>3σ, recurrence <70%)
     ▼
-Clean_Revenue / Clean_COGS
+Clean_Revenue
     │
     ▼ [Bước 2: Prophet]
     │  - Trend + Yearly/Weekly Seasonality
@@ -71,19 +71,19 @@ lgbm_residual_pred
     │
     ▼ [Bước 4: Blend & Postprocess]
        Final = Prophet + LGBM_Residual
-       Clip âm, enforce COGS ≤ Revenue
+       Clip âm, dẫn xuất COGS từ Revenue (COGS = Revenue * 0.825)
     ▼
 submission.csv (548 rows, 2023-01-01 → 2024-07-01)
 ```
 
 ---
 
-## Kết quả Validation (2021–2022)
+## Kết quả Validation (Out-of-sample: 2022)
 
-| Target  | MAE       | RMSE      | R²    | MAPE  |
-|---------|-----------|-----------|-------|-------|
-| Revenue | 0.33M VND | 0.43M VND | 0.932 | 13.4% |
-| COGS    | 0.28M VND | 0.38M VND | 0.932 | 12.9% |
+| Target  | MAE        | RMSE       | R²     | MAPE   |
+|---------|------------|------------|--------|--------|
+| Revenue | 0.697M VND | 0.926M VND | 0.6943 | 24.86% |
+| COGS    | 0.686M VND | 0.898M VND | 0.6212 | 26.76% |
 
 ---
 
