@@ -1,0 +1,55 @@
+[2026-05-01 12:24:45] INFO — 🔥 THE GRIDBREAKER PIPELINE — BẮT ĐẦU
+[2026-05-01 12:24:45] INFO — Train: ... → 2022-12-31
+[2026-05-01 12:24:45] INFO — Test:  2023-01-01 → 2024-07-01
+[2026-05-01 12:24:45] INFO — Loading sales data...
+[2026-05-01 12:24:45] INFO — Sales: 2012-07-04 → 2022-12-31 (3833 rows)
+[2026-05-01 12:24:45] INFO — Loading inventory stockout flags...
+[2026-05-01 12:24:45] INFO — Stockout flags: 126 monthly snapshots
+[2026-05-01 12:24:45] INFO — ==================================================
+[2026-05-01 12:24:45] INFO — BƯỚC 1: TARGET DENOISING
+[2026-05-01 12:24:45] INFO — ==================================================
+[2026-05-01 12:24:45] INFO — Processing Revenue:
+[2026-05-01 12:24:45] INFO —   Imputed 125 stockout day(s).
+[2026-05-01 12:24:45] INFO —   Capped 6 non-recurring outlier(s).
+[2026-05-01 12:24:45] INFO — Processing COGS:
+[2026-05-01 12:24:45] INFO —   Imputed 125 stockout day(s).
+[2026-05-01 12:24:45] INFO —   Capped 9 non-recurring outlier(s).
+[2026-05-01 12:24:45] INFO —   Revenue: mean=4,286,584 → Clean mean=4,259,994
+[2026-05-01 12:24:45] INFO —   COGS:    mean=3,695,134 → Clean mean=3,671,541
+[2026-05-01 12:24:45] INFO — ==================================================
+[2026-05-01 12:24:45] INFO — BƯỚC 2: PROPHET — Tầng 1 cốt lõi
+[2026-05-01 12:24:45] INFO — ==================================================
+[2026-05-01 12:24:45] INFO —   Fitting Prophet cho Revenue...
+[2026-05-01 12:24:46] INFO —   Prophet Revenue: fitted with 3833 datapoints, 1218 holiday rows.
+[2026-05-01 12:24:47] INFO — ==================================================
+[2026-05-01 12:24:47] INFO — BƯỚC 3: LGBM RESIDUAL — Revenue
+[2026-05-01 12:24:47] INFO — ==================================================
+[2026-05-01 12:24:47] INFO —   Fitting LightGBM Residual cho Revenue...
+[2026-05-01 12:24:49] INFO —   LightGBM Revenue: trained on 3467 samples, 11 features.
+[2026-05-01 12:24:49] INFO —   Top 5 features: {'prophet_trend': 4572, 'resid_roll28_lag365': 3640, 'resid_lag365': 3363, 'dayofyear': 3262, 'resid_lag364': 3220}
+[2026-05-01 12:24:49] INFO —   📊 Revenue Validation (2021-2022):
+[2026-05-01 12:24:49] INFO —      MAE  = 0.326M VND
+[2026-05-01 12:24:49] INFO —      RMSE = 0.435M VND
+[2026-05-01 12:24:49] INFO —      R²   = 0.9320
+[2026-05-01 12:24:49] INFO —      MAPE = 13.36%
+[2026-05-01 12:24:49] INFO —   Fitting Prophet cho COGS...
+[2026-05-01 12:24:50] INFO —   Prophet COGS: fitted with 3833 datapoints, 1218 holiday rows.
+[2026-05-01 12:24:50] INFO — ==================================================
+[2026-05-01 12:24:50] INFO — BƯỚC 3: LGBM RESIDUAL — COGS
+[2026-05-01 12:24:50] INFO — ==================================================
+[2026-05-01 12:24:50] INFO —   Fitting LightGBM Residual cho COGS...
+[2026-05-01 12:24:51] INFO —   LightGBM COGS: trained on 3467 samples, 11 features.
+[2026-05-01 12:24:51] INFO —   Top 5 features: {'prophet_trend': 4339, 'resid_lag366': 3576, 'resid_roll28_lag365': 3509, 'resid_lag365': 3459, 'resid_lag364': 3401}
+[2026-05-01 12:24:51] INFO —   📊 COGS Validation (2021-2022):
+[2026-05-01 12:24:51] INFO —      MAE  = 0.283M VND
+[2026-05-01 12:24:51] INFO —      RMSE = 0.378M VND
+[2026-05-01 12:24:51] INFO —      R²   = 0.9320
+[2026-05-01 12:24:51] INFO —      MAPE = 12.85%
+[2026-05-01 12:24:51] INFO — ==================================================
+[2026-05-01 12:24:51] INFO — BƯỚC 4: HẬU XỬ LÝ & XUẤT SUBMISSION
+[2026-05-01 12:24:51] INFO — ==================================================
+[2026-05-01 12:24:51] INFO —   Fixed 43 row(s) where COGS > Revenue.
+[2026-05-01 12:24:51] INFO —   ✅ Saved submission: C:\Users\Admin\Desktop\datathon-2026-round-1\submission.csv (548 rows)
+[2026-05-01 12:24:51] INFO —      Revenue: mean=3,929,809, min=715,170, max=11,356,905
+[2026-05-01 12:24:51] INFO —      COGS:    mean=3,184,760, min=607,650, max=9,332,751
+[2026-05-01 12:24:51] INFO — 🏁 THE GRIDBREAKER PIPELINE — HOÀN TẤT!

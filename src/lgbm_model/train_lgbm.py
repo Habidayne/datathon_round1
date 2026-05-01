@@ -66,29 +66,41 @@ def fit_lgbm_residual(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     target_name: str = "Revenue",
+    params = None,
+    eval_set=None
 ) -> lgb.LGBMRegressor:
     """Huấn luyện LightGBM trên residuals."""
     logger.info(f"  Fitting LightGBM Residual cho {target_name}...")
 
-    model = lgb.LGBMRegressor(
-        n_estimators=800,
-        learning_rate=0.03,
-        num_leaves=63,
-        max_depth=8,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        reg_alpha=0.1,
-        reg_lambda=1.0,
-        random_state=SEED,
-        verbose=-1,
-    )
+    if params is None:
+        params = {
+            "n_estimators":      300,
+            "learning_rate":     0.05,
+            "max_depth":         5,
+            "num_leaves":        31,
+            "min_child_samples": 30,
+            "subsample":         0.8,
+            "colsample_bytree":  0.8,
+            "reg_alpha":         0.1,
+            "reg_lambda":        1.0,
+            "random_state":      SEED,
+            "verbose":           -1,
+        }
+
+    model = lgb.LGBMRegressor(**params)
 
     # Drop NaN rows (lag_365 cần >= 1 năm data)
     mask = X_train[FEAT_COLS].notna().all(axis=1) & y_train.notna()
     X_clean = X_train.loc[mask, FEAT_COLS]
     y_clean = y_train.loc[mask]
 
-    model.fit(X_clean, y_clean)
+    fit_kwargs = {}
+    if eval_set is not None:
+        X_es, y_es = eval_set
+        fit_kwargs["eval_set"] = [(X_es[FEAT_COLS], y_es)]
+        fit_kwargs["callbacks"] = [lgb.early_stopping(50, verbose=False)]
+
+    model.fit(X_clean, y_clean, **fit_kwargs)
     logger.info(f"  LightGBM {target_name}: trained on {len(X_clean)} samples, {len(FEAT_COLS)} features.")
 
     # Log top features
@@ -103,6 +115,9 @@ def predict_lgbm_residual(
     X: pd.DataFrame,
 ) -> pd.Series:
     """Dự đoán residual bằng LightGBM."""
+    n_nan = X[FEAT_COLS].isna().sum().sum()
+    if n_nan > 0:
+        logger.warning(f"  {n_nan} NaN cells trong X_test — fillna(0) được áp dụng")
     X_filled = X[FEAT_COLS].fillna(0)
     pred = model.predict(X_filled)
     return pd.Series(pred, index=X.index, name="lgbm_residual_pred")

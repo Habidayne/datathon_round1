@@ -138,32 +138,28 @@ def viz13_marketing_allocation(sales: pd.DataFrame, web_traffic_path: str,
     → Tìm quarter nào margin cao nhất + conversion rate từ web traffic cao nhất
     → Đề xuất phân bổ marketing budget theo quarter
     """
-    # Profit margin by quarter
-    df = sales.copy()
+    # Web traffic conversion proxy (only available 2021-2022)
+    wt = pd.read_csv(web_traffic_path, parse_dates=["date"]).set_index("date")
+    wt_daily = wt.groupby(wt.index).agg({"sessions": "sum", "unique_visitors": "sum"}).copy()
+    
+    # Filter sales to overlap with web traffic to prevent mixing time periods
+    df = sales.reindex(wt_daily.index).dropna().copy()
     df["margin"]  = (df["Revenue"] - df["COGS"]) / df["Revenue"] * 100
     df["quarter"] = df.index.quarter
     margin_q = df.groupby("quarter")["margin"].mean()
 
-    # Web traffic conversion proxy
-    wt = pd.read_csv(web_traffic_path, parse_dates=["date"]).set_index("date")
-    wt_daily = wt.groupby(wt.index).agg({"sessions": "sum", "unique_visitors": "sum"}).copy()
     wt_daily["quarter"] = wt_daily.index.quarter
-
-    # Revenue per session = conversion efficiency
-    rev_daily = sales["Revenue"].reindex(wt_daily.index).dropna()
-    wt_daily  = wt_daily.reindex(rev_daily.index)
-    wt_daily["rev_per_session"] = rev_daily / wt_daily["sessions"]
+    wt_daily["rev_per_session"] = df["Revenue"] / wt_daily["sessions"]
     efficiency_q = wt_daily.groupby("quarter")["rev_per_session"].mean()
 
-    # Composite ROI Priority Score — dung softmax thay vi min-max
-    # Min-Max ep Q3=0 vi la thap nhat ca 2 chieu (artefact toan hoc)
-    # Softmax dam bao moi quy deu co muc san toi thieu, phan anh dung
-    # "muc do uu tien tuong doi" thay vi "ty le ngan sach tuyet doi"
-    raw_score = 0.5 * margin_q + 0.5 * efficiency_q / efficiency_q.max() * margin_q.max()
-    # Softmax: e^x / sum(e^x) — dam bao tat ca > 0
-    exp_score = np.exp((raw_score - raw_score.mean()) / raw_score.std())
-    roi_score = exp_score
-    roi_score_pct = exp_score / exp_score.sum() * 100
+    # Composite ROI Priority Score = Margin * Conversion
+    # Directly measuring how much profit each session brings
+    raw_score = margin_q * efficiency_q
+    
+    # Softmax to normalize into investment allocations
+    from scipy.special import softmax
+    roi_z = (raw_score - raw_score.mean()) / raw_score.std()
+    roi_score_pct = pd.Series(softmax(roi_z) * 100, index=raw_score.index)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     fig.patch.set_facecolor("white")
@@ -191,7 +187,7 @@ def viz13_marketing_allocation(sales: pd.DataFrame, web_traffic_path: str,
     explode   = [0.05 if s == sizes.max() else 0 for s in sizes]
     colors_q  = [ACCENT, GOLD, PURPLE, RED]
     wedges, texts, autotexts = ax2.pie(sizes, labels=labels_q, autopct='%1.1f%%',
-                                        explode=explode, colors=colors_q,
+                                        explode=explode, colors=colors_q, pctdistance=0.80,
                                         startangle=90, textprops={"fontsize": 10})
     # Add inner circle for donut
     centre_circle = plt.Circle((0, 0), 0.60, fc='white')
